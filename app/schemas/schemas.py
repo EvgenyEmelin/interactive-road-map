@@ -1,5 +1,5 @@
 from typing import List, Optional, Any
-from datetime import date
+from datetime import date, datetime
 from pydantic import BaseModel, ConfigDict, field_serializer, field_validator
 from shapely import wkb
 from geoalchemy2 import WKBElement, Geometry
@@ -8,17 +8,20 @@ import geoalchemy2
 
 class DocumentBase(BaseModel):
     filename: str
-    filepath: str
+    file_url: str
+    description: Optional[str] = None
     creation_date: Optional[date] = None
 
-
-class DocumentCreate(DocumentBase):
-    road_id: int
-
+class DocumentCreate(BaseModel):
+    filename: str
+    file_url: str
+    description: Optional[str] = None
+    creation_date: Optional[date] = None
 
 class Document(DocumentBase):
     id: int
     road_id: int
+    upload_date: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from typing import List, Optional
-from app.schemas.schemas import Road, RoadCreate, Document, RoadWithDocuments, RoadsListResponse
+from app.schemas.schemas import Road, RoadCreate, Document, RoadWithDocuments, RoadsListResponse, DocumentCreate
 from app.db.session import get_db
 from app.crud import road_service
-from sqlalchemy.ext.asyncio import AsyncSession  # Этот импорт должен быть
+from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import date
+import os
 
 router = APIRouter()
 
@@ -48,9 +50,9 @@ async def read_road_with_documents(road_id: int, db: AsyncSession = Depends(get_
 
     # Создаем объект RoadWithDocuments
     return RoadWithDocuments(
-        id=road.id,
-        name=road.name,
-        geom=road.geom,
+        id=road['id'],
+        name=road['name'],
+        geom=road['geom'],
         documents=documents
     )
 
@@ -99,7 +101,6 @@ async def search_roads_endpoint(
 
 
 # Дополнительные эндпоинты для фронтенда
-
 @router.get("/all/basic", response_model=List[Road])
 async def get_all_roads_basic(db: AsyncSession = Depends(get_db)):
     """
@@ -118,3 +119,53 @@ async def get_road_basic(road_id: int, db: AsyncSession = Depends(get_db)):
     if not road:
         raise HTTPException(status_code=404, detail="Road not found")
     return road
+
+#Работа с документами
+@router.post("/{road_id}/add-document", response_model=Document)
+async def add_document(
+    road_id: int,
+    filename: str = Form(...),
+    file_url: str = Form(...),
+    description: Optional[str] = Form(None),
+    creation_date: Optional[date] = Form(None),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Добавить ссылку на документ для дороги (поддержка FormData)
+    """
+    # Проверяем существование дороги
+    road = await road_service.get_road(db, road_id=road_id)
+    if not road:
+        raise HTTPException(status_code=404, detail="Road not found")
+
+    # Создаем запись в БД
+    document_data = {
+        'road_id': road_id,
+        'filename': filename,
+        'file_url': file_url,
+        'description': description,
+        'creation_date': creation_date
+    }
+
+    document = await road_service.create_document(db, document_data)
+    return document
+
+
+@router.get("/{road_id}/documents", response_model=List[Document])
+async def read_road_documents(road_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    Получить все документы для конкретной дороги
+    """
+    documents = await road_service.get_documents_for_road(db, road_id)
+    return documents
+
+
+@router.delete("/documents/{document_id}")
+async def delete_document_endpoint(document_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    Удалить документ
+    """
+    success = await road_service.delete_document(db, document_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Document not found")
+    return {"message": "Document deleted successfully"}

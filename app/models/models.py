@@ -1,6 +1,7 @@
-from sqlalchemy import Integer, String, Column, ForeignKey, Date
+from sqlalchemy import Integer, String, Column, ForeignKey, Date, DateTime
 from sqlalchemy.orm import relationship, DeclarativeBase
 from geoalchemy2 import Geometry
+from datetime import datetime
 
 class Base(DeclarativeBase):
     pass
@@ -16,7 +17,9 @@ class Document(Base):
     __tablename__ = 'documents'
     id = Column(Integer, primary_key=True, index=True)
     road_id = Column(Integer, ForeignKey('roads.id', ondelete='CASCADE'), nullable=False)
-    filename = Column(String(255), nullable=False)
-    filepath = Column(String, nullable=False)
-    creation_date = Column(Date)
+    filename = Column(String(255), nullable=False)  # Название документа
+    file_url = Column(String, nullable=False)       # Ссылка на PDF в интернете
+    description = Column(String(500))               # Описание документа
+    creation_date = Column(Date)                    # Дата создания документа
+    upload_date = Column(DateTime, default=datetime.utcnow)  # Дата добавления в систему
     road = relationship('Road', back_populates='documents')

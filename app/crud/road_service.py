@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, delete
 from app.models.models import Road, Document
 from app.schemas.schemas import RoadCreate, convert_db_geom_to_wkt
 from geoalchemy2 import WKTElement
@@ -119,3 +119,30 @@ async def update_road(db: AsyncSession, road_id: int, road_data: dict):
     await db.commit()
     await db.refresh(road)
     return await road_to_dict(road)
+
+
+# Новые функции для работы с документами (упрощенные)
+async def create_document(db: AsyncSession, document_data: dict) -> Document:
+    """Создать запись о документе в БД"""
+    document = Document(**document_data)
+    db.add(document)
+    await db.commit()
+    await db.refresh(document)
+    return document
+
+
+async def get_document(db: AsyncSession, document_id: int) -> Document:
+    """Получить документ по ID"""
+    result = await db.execute(select(Document).where(Document.id == document_id))
+    return result.scalar_one_or_none()
+
+
+async def delete_document(db: AsyncSession, document_id: int) -> bool:
+    """Удалить документ"""
+    document = await get_document(db, document_id)
+    if not document:
+        return False
+
+    await db.delete(document)
+    await db.commit()
+    return True

@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Box, Typography, Button, TextField, Paper, List, ListItem, ListItemText,
-  Dialog, DialogTitle, DialogContent, DialogActions, IconButton, InputAdornment
+  Dialog, DialogTitle, DialogContent, DialogActions, IconButton, InputAdornment,
+  Chip, Alert, Snackbar
 } from '@mui/material';
 import { MapContainer, TileLayer, Polyline, useMapEvents, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import { Search, Clear } from '@mui/icons-material'; // Или используйте текстовые иконки
 import 'leaflet/dist/leaflet.css';
 
 // Фикс для иконок маркеров
@@ -100,7 +100,6 @@ function parseWKTToCoords(wkt) {
 function calculateRoadCenter(coords) {
   if (coords.length === 0) return null;
 
-  // Вычисляем среднюю точку всех координат
   const sum = coords.reduce((acc, [lat, lng]) => {
     return [acc[0] + lat, acc[1] + lng];
   }, [0, 0]);
@@ -108,30 +107,33 @@ function calculateRoadCenter(coords) {
   return [sum[0] / coords.length, sum[1] / coords.length];
 }
 
-// Функция для вычисления bounding box дороги
-function calculateRoadBoundingBox(coords) {
-  if (coords.length === 0) return null;
+// Функция для подсветки совпадений в поиске
+function highlightSearchMatch(text, query) {
+  if (!query.trim()) return text;
 
-  let minLat = coords[0][0];
-  let maxLat = coords[0][0];
-  let minLng = coords[0][1];
-  let maxLng = coords[0][1];
+  const regex = new RegExp(`(${query})`, 'gi');
+  const parts = text.split(regex);
 
-  coords.forEach(([lat, lng]) => {
-    minLat = Math.min(minLat, lat);
-    maxLat = Math.max(maxLat, lat);
-    minLng = Math.min(minLng, lng);
-    maxLng = Math.max(maxLng, lng);
-  });
-
-  return [[minLat, minLng], [maxLat, maxLng]];
+  return (
+    <span>
+      {parts.map((part, index) =>
+        part.toLowerCase() === query.toLowerCase() ? (
+          <span key={index} style={{ backgroundColor: '#ffeb3b', fontWeight: 'bold' }}>
+            {part}
+          </span>
+        ) : (
+          part
+        )
+      )}
+    </span>
+  );
 }
 
 // Главный компонент App
 export default function App() {
   const [roads, setRoads] = useState([]);
-  const [filteredRoads, setFilteredRoads] = useState([]); // Отфильтрованные дороги
-  const [searchQuery, setSearchQuery] = useState(''); // Поисковый запрос
+  const [filteredRoads, setFilteredRoads] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [roadName, setRoadName] = useState('');
   const [roadPath, setRoadPath] = useState([]);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -141,6 +143,15 @@ export default function App() {
   const [drawerKey, setDrawerKey] = useState(0);
   const [mapCenter, setMapCenter] = useState([56.838011, 60.597465]);
   const [mapZoom, setMapZoom] = useState(12);
+
+  // Состояния для загрузки PDF
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [pdfUrl, setPdfUrl] = useState('');
+  const [pdfTitle, setPdfTitle] = useState('');
+  const [pdfDescription, setPdfDescription] = useState('');
+  const [uploadError, setUploadError] = useState('');
+  const [uploadSuccess, setUploadSuccess] = useState('');
+
   const mapRef = useRef();
 
   // Загрузка дорог при монтировании
@@ -168,7 +179,7 @@ export default function App() {
       if (response.ok) {
         const data = await response.json();
         setRoads(data);
-        setFilteredRoads(data); // Инициализируем отфильтрованный список
+        setFilteredRoads(data);
         localStorage.setItem('roads', JSON.stringify(data));
       }
     } catch (error) {
@@ -182,31 +193,26 @@ export default function App() {
     }
   };
 
-  // Очистка поиска
-  const clearSearch = () => {
-    setSearchQuery('');
-  };
-
   // Функция для центрирования карты на дороге
   const focusOnRoad = (road) => {
-    try {
-      const coords = parseWKTToCoords(road.geom);
-      if (coords.length > 0) {
-        // Вариант 1: Центрируем на середине дороги
-        //const center = calculateRoadCenter(coords);
-        //setMapCenter(center);
-        //setMapZoom(14); // Увеличиваем zoom для лучшего обзора
+      try {
+        const coords = parseWKTToCoords(road.geom);
+        if (coords.length > 0) {
+          // Вариант 1: Центрируем на середине дороги
+          const center = calculateRoadCenter(coords);
+          setMapCenter(center);
+          setMapZoom(20); // Увеличиваем zoom для лучшего обзора
 
-        // Вариант 2: Подстраиваем viewport под всю дорогу
-         const bounds = calculateRoadBoundingBox(coords);
-         if (mapRef.current) {
-           mapRef.current.fitBounds(bounds, { padding: [50, 50] });
-         }
+          // Вариант 2: Подстраиваем viewport под всю дорогу
+          // const bounds = calculateRoadBoundingBox(coords);
+          // if (mapRef.current) {
+          //   mapRef.current.fitBounds(bounds, { padding: [50, 50] });
+          // }
+        }
+      } catch (error) {
+        console.error('Error focusing on road:', error);
       }
-    } catch (error) {
-      console.error('Error focusing on road:', error);
-    }
-  };
+    };
 
   // Обработчик клика на дорогу в списке
   const handleRoadListClick = (road) => {
@@ -282,7 +288,96 @@ export default function App() {
     }
   };
 
-  // Закрытие диалога информации
+  // Очистка поиска
+  const clearSearch = () => {
+    setSearchQuery('');
+  };
+
+  // Функции для работы с PDF
+const handleUploadClick = () => {
+  setUploadDialogOpen(true);
+  setPdfUrl('');
+  setPdfTitle('');
+  setPdfDescription(''); // ← СБРАСЫВАЕМ ОПИСАНИЕ
+  setUploadError('');
+};
+
+const handlePdfUpload = async () => {
+  const formData = new FormData();
+  formData.append('filename', pdfTitle || 'Документ');
+  formData.append('file_url', pdfUrl);
+  formData.append('description', pdfDescription);
+  formData.append('creation_date', new Date().toISOString().split('T')[0]);
+
+  try {
+    const response = await fetch(`http://localhost:8000/roads/${selectedRoad.id}/add-document`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      let errorMessage = `HTTP error! status: ${response.status}`;
+
+      try {
+        const errorData = await response.json();
+        console.log('Error response from server:', errorData);
+
+        // Обрабатываем разные форматы ошибок от FastAPI
+        if (errorData.detail) {
+          if (Array.isArray(errorData.detail)) {
+            // Ошибки валидации Pydantic
+            errorMessage = errorData.detail.map(err =>
+              `${err.loc ? err.loc.join('.') + ': ' : ''}${err.msg}`
+            ).join(', ');
+          } else if (typeof errorData.detail === 'string') {
+            // Простая текстовая ошибка
+            errorMessage = errorData.detail;
+          } else if (typeof errorData.detail === 'object') {
+            // Объект ошибки
+            errorMessage = JSON.stringify(errorData.detail);
+          }
+        } else if (errorData.message) {
+          errorMessage = errorData.message;
+        }
+      } catch (parseError) {
+        console.error('Could not parse error response:', parseError);
+        errorMessage = `Server error: ${response.status} ${response.statusText}`;
+      }
+
+      throw new Error(errorMessage);
+    }
+
+    const newDocument = await response.json();
+    setDocuments([...documents, newDocument]);
+    setUploadSuccess('PDF ссылка добавлена!');
+    setUploadDialogOpen(false);
+    setPdfUrl('');
+    setPdfTitle('');
+
+  } catch (error) {
+    console.error('Upload error details:', error);
+    setUploadError(`Ошибка при добавлении PDF: ${error.message}`);
+  }
+};
+
+
+const handleDeleteDocument = async (documentId) => {
+  try {
+    const response = await fetch(`http://localhost:8000/roads/documents/${documentId}`, {
+      method: 'DELETE',
+    });
+
+    if (response.ok) {
+      setDocuments(documents.filter(doc => doc.id !== documentId));
+      setUploadSuccess('Документ удален!');
+    } else {
+      setUploadError('Ошибка при удалении документа');
+    }
+  } catch (error) {
+    setUploadError('Ошибка при удалении документа');
+  }
+};
+
   const closeInfoDialog = () => {
     setInfoDialogOpen(false);
     setSelectedRoad(null);
@@ -353,162 +448,247 @@ export default function App() {
           Список дорог ({filteredRoads.length})
           {searchQuery && ` (найдено ${filteredRoads.length} из ${roads.length})`}
         </Typography>
-         {/* Поле поиска */}
-<TextField
-  placeholder="Поиск по названию дороги..."
-  value={searchQuery}
-  onChange={(e) => setSearchQuery(e.target.value)}
-  fullWidth
-  sx={{ mb: 2 }}
-  InputProps={{
-    startAdornment: (
-      <InputAdornment position="start">
-        <span style={{ fontSize: '20px' }}>🔍</span>
-      </InputAdornment>
-    ),
-    endAdornment: searchQuery && (
-      <InputAdornment position="end">
-        <IconButton
-          aria-label="Очистить поиск"
-          onClick={clearSearch}
-          edge="end"
-          size="small"
-        >
-          <span style={{ fontSize: '16px' }}>✕</span>
-        </IconButton>
-      </InputAdornment>
-    )
-  }}
-/>
 
-<Box sx={{ flex: 1, overflowY: 'auto' }}>
-  {filteredRoads.length === 0 ? (
-    <Box sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>
-      {searchQuery ? (
-        <>
-          <Typography variant="body1" gutterBottom>
-            Дороги с названием "{searchQuery}" не найдены
-          </Typography>
-          <Button
-            variant="outlined"
-            onClick={clearSearch}
-            size="small"
-          >
-            Показать все дороги
-          </Button>
-        </>
-      ) : (
-        <Typography variant="body1">
-          Нет созданных дорог
-        </Typography>
-      )}
-    </Box>
-  ) : (
-    <List>
-      {filteredRoads.map(road => (
-        <ListItem
-          key={road.id}
-          button
-          onClick={() => handleRoadListClick(road)}
-          sx={{
-            borderBottom: '1px solid #eee',
-            backgroundColor: selectedRoad?.id === road.id ? '#e3f2fd' : 'inherit',
-            '&:hover': { backgroundColor: '#f5f5f5' }
+        {/* Поле поиска */}
+        <TextField
+          placeholder="Поиск по названию дороги..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          fullWidth
+          sx={{ mb: 2 }}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <span style={{ fontSize: '20px' }}>🔍</span>
+              </InputAdornment>
+            ),
+            endAdornment: searchQuery && (
+              <InputAdornment position="end">
+                <IconButton
+                  aria-label="Очистить поиск"
+                  onClick={clearSearch}
+                  edge="end"
+                  size="small"
+                >
+                  <span style={{ fontSize: '16px' }}>✕</span>
+                </IconButton>
+              </InputAdornment>
+            )
           }}
-        >
-          <ListItemText
-            primary={highlightSearchMatch(road.name, searchQuery)}
-            secondary={`ID: ${road.id} • Точек: ${parseWKTToCoords(road.geom).length}`}
-          />
-        </ListItem>
-      ))}
-    </List>
-  )}
-</Box>
-</Paper>
+        />
 
-{/* Диалог с информацией о дороге */}
-<Dialog open={infoDialogOpen} onClose={closeInfoDialog} maxWidth="sm" fullWidth>
+        <Box sx={{ flex: 1, overflowY: 'auto' }}>
+          {filteredRoads.length === 0 ? (
+            <Box sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>
+              {searchQuery ? (
+                <>
+                  <Typography variant="body1" gutterBottom>
+                    Дороги с названием "{searchQuery}" не найдены
+                  </Typography>
+                  <Button
+                    variant="outlined"
+                    onClick={clearSearch}
+                    size="small"
+                  >
+                    Показать все дороги
+                  </Button>
+                </>
+              ) : (
+                <Typography variant="body1">
+                  Нет созданных дорог
+                </Typography>
+              )}
+            </Box>
+          ) : (
+            <List>
+              {filteredRoads.map(road => (
+                <ListItem
+                  key={road.id}
+                  button
+                  onClick={() => handleRoadListClick(road)}
+                  sx={{
+                    borderBottom: '1px solid #eee',
+                    backgroundColor: selectedRoad?.id === road.id ? '#e3f2fd' : 'inherit',
+                    '&:hover': { backgroundColor: '#f5f5f5' }
+                  }}
+                >
+                  <ListItemText
+                    primary={highlightSearchMatch(road.name, searchQuery)}
+                    secondary={`ID: ${road.id} • Точек: ${parseWKTToCoords(road.geom).length}`}
+                  />
+                </ListItem>
+              ))}
+            </List>
+          )}
+        </Box>
+      </Paper>
+
+      {/* Диалог с информацией о дороге */}
+      <Dialog open={infoDialogOpen} onClose={closeInfoDialog} maxWidth="sm" fullWidth>
+        <DialogTitle>
+          <Box display="flex" alignItems="center" justifyContent="space-between">
+            <Typography variant="h6">
+              {selectedRoad?.name}
+            </Typography>
+            <IconButton onClick={closeInfoDialog}>
+              ✕
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="textSecondary" gutterBottom>
+            ID: {selectedRoad?.id}
+          </Typography>
+
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h6">
+              Документы ({documents.length})
+            </Typography>
+            <Button
+              variant="outlined"
+              onClick={handleUploadClick}
+              size="small"
+              startIcon={<span>📤</span>}
+            >
+              Добавить PDF
+            </Button>
+          </Box>
+
+          {documents.length > 0 ? (
+            <List>
+              {documents.map(doc => (
+                <ListItem
+                  key={doc.id}
+                  sx={{
+                    textDecoration: 'none',
+                    color: 'inherit',
+                    '&:hover': { backgroundColor: '#f5f5f5' }
+                  }}
+                >
+                  <ListItemText
+                    primary={
+                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                        <span style={{ marginRight: '8px', color: '#1976d2' }}>📄</span>
+                        <a
+                          href={doc.file_url}  // Измените filepath на file_url
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ textDecoration: 'none', color: 'inherit', flex: 1 }}
+                        >
+                          {doc.filename}
+                        </a>
+                      </Box>
+                    }
+                    secondary={doc.creation_date ? new Date(doc.creation_date).toLocaleDateString() : 'Дата не указана'}
+                  />
+                  <IconButton
+                    edge="end"
+                    aria-label="delete"
+                    onClick={() => handleDeleteDocument(doc.id)}
+                    size="small"
+                  >
+                    <span style={{ color: '#f44336' }}>🗑️</span>
+                  </IconButton>
+                </ListItem>
+              ))}
+            </List>
+          ) : (
+            <Typography variant="body2" color="textSecondary">
+              Нет прикрепленных документов
+            </Typography>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeInfoDialog}>Закрыть</Button>
+          <Button
+            onClick={() => selectedRoad && focusOnRoad(selectedRoad)}
+            variant="outlined"
+          >
+            Показать на карте
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Диалог добавления PDF */}
+      <Dialog open={uploadDialogOpen} onClose={() => setUploadDialogOpen(false)} maxWidth="sm" fullWidth>
   <DialogTitle>
     <Box display="flex" alignItems="center" justifyContent="space-between">
       <Typography variant="h6">
-        {selectedRoad?.name}
+        Добавить PDF к дороге "{selectedRoad?.name}"
       </Typography>
-      <IconButton onClick={closeInfoDialog}>
+      <IconButton onClick={() => setUploadDialogOpen(false)}>
         ✕
       </IconButton>
     </Box>
   </DialogTitle>
   <DialogContent>
-    <Typography variant="body2" color="textSecondary" gutterBottom>
-      ID: {selectedRoad?.id}
-    </Typography>
-
-    <Typography variant="h6" sx={{ mt: 2, mb: 1 }}>
-      Документы ({documents.length})
-    </Typography>
-
-    {documents.length > 0 ? (
-      <List>
-        {documents.map(doc => (
-          <ListItem
-            key={doc.id}
-            component="a"
-            href={`http://localhost:8000${doc.filepath}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            sx={{
-              textDecoration: 'none',
-              color: 'inherit',
-              '&:hover': { backgroundColor: '#f5f5f5' }
-            }}
-          >
-            <span style={{ marginRight: '8px', color: '#1976d2' }}>📄</span>
-            <ListItemText
-              primary={doc.filename}
-              secondary={doc.creation_date ? new Date(doc.creation_date).toLocaleDateString() : 'Дата не указана'}
-            />
-          </ListItem>
-        ))}
-      </List>
-    ) : (
-      <Typography variant="body2" color="textSecondary">
-        Нет прикрепленных документов
-      </Typography>
-    )}
+    <Box sx={{ mt: 2 }}>
+      <TextField
+        label="Название документа"
+        fullWidth
+        value={pdfTitle}
+        onChange={(e) => setPdfTitle(e.target.value)}
+        sx={{ mb: 2 }}
+        placeholder="Например: Технический паспорт дороги"
+      />
+      <TextField
+        label="Ссылка на PDF файл"
+        fullWidth
+        value={pdfUrl}
+        onChange={(e) => setPdfUrl(e.target.value)}
+        placeholder="https://example.com/document.pdf"
+        helperText="Введите прямую ссылку на PDF файл"
+        sx={{ mb: 2 }}
+      />
+      {/* ДОБАВЬТЕ ЭТО ПОЛЕ */}
+      <TextField
+        label="Описание документа"
+        fullWidth
+        value={pdfDescription}
+        onChange={(e) => setPdfDescription(e.target.value)}
+        placeholder="Описание документа (необязательно)"
+        multiline
+        rows={3}
+      />
+      {uploadError && (
+        <Alert severity="error" sx={{ mt: 2 }}>
+          {uploadError}
+        </Alert>
+      )}
+    </Box>
   </DialogContent>
   <DialogActions>
-    <Button onClick={closeInfoDialog}>Закрыть</Button>
+    <Button onClick={() => setUploadDialogOpen(false)}>Отмена</Button>
     <Button
-      onClick={() => selectedRoad && focusOnRoad(selectedRoad)}
-      variant="outlined"
+      onClick={handlePdfUpload}
+      variant="contained"
+      disabled={!pdfUrl.trim()}
     >
-      Показать на карте
+      Добавить PDF
     </Button>
   </DialogActions>
 </Dialog>
-</Box>
-);
-}
 
-// Функция для подсветки совпадений в поиске (добавьте эту функцию в конец файла)
-function highlightSearchMatch(text, query) {
-  if (!query.trim()) return text;
+      {/* Уведомления */}
+      <Snackbar
+        open={!!uploadError}
+        autoHideDuration={6000}
+        onClose={() => setUploadError('')}
+      >
+        <Alert severity="error" onClose={() => setUploadError('')}>
+          {uploadError}
+        </Alert>
+      </Snackbar>
 
-  const regex = new RegExp(`(${query})`, 'gi');
-  const parts = text.split(regex);
-
-  return (
-    <span>
-      {parts.map((part, index) =>
-        part.toLowerCase() === query.toLowerCase() ? (
-          <span key={index} style={{ backgroundColor: '#ffeb3b', fontWeight: 'bold' }}>
-            {part}
-          </span>
-        ) : (
-          part
-        )
-      )}
-    </span>
+      <Snackbar
+        open={!!uploadSuccess}
+        autoHideDuration={6000}
+        onClose={() => setUploadSuccess('')}
+      >
+        <Alert severity="success" onClose={() => setUploadSuccess('')}>
+          {uploadSuccess}
+        </Alert>
+      </Snackbar>
+    </Box>
   );
 }
