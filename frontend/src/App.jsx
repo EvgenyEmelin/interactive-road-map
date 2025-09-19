@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Box, Typography, Button, TextField, Paper, List, ListItem, ListItemText,
-  Dialog, DialogTitle, DialogContent, DialogActions, IconButton
+  Dialog, DialogTitle, DialogContent, DialogActions, IconButton, InputAdornment
 } from '@mui/material';
 import { MapContainer, TileLayer, Polyline, useMapEvents, useMap } from 'react-leaflet';
 import L from 'leaflet';
+import { Search, Clear } from '@mui/icons-material'; // Или используйте текстовые иконки
 import 'leaflet/dist/leaflet.css';
 
 // Фикс для иконок маркеров
@@ -129,6 +130,8 @@ function calculateRoadBoundingBox(coords) {
 // Главный компонент App
 export default function App() {
   const [roads, setRoads] = useState([]);
+  const [filteredRoads, setFilteredRoads] = useState([]); // Отфильтрованные дороги
+  const [searchQuery, setSearchQuery] = useState(''); // Поисковый запрос
   const [roadName, setRoadName] = useState('');
   const [roadPath, setRoadPath] = useState([]);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -145,6 +148,19 @@ export default function App() {
     loadRoads();
   }, []);
 
+  // Фильтрация дорог при изменении поискового запроса
+  useEffect(() => {
+    if (searchQuery.trim() === '') {
+      setFilteredRoads(roads);
+    } else {
+      const query = searchQuery.toLowerCase().trim();
+      const filtered = roads.filter(road =>
+        road.name.toLowerCase().includes(query)
+      );
+      setFilteredRoads(filtered);
+    }
+  }, [searchQuery, roads]);
+
   // Загрузка всех дорог
   const loadRoads = async () => {
     try {
@@ -152,15 +168,23 @@ export default function App() {
       if (response.ok) {
         const data = await response.json();
         setRoads(data);
+        setFilteredRoads(data); // Инициализируем отфильтрованный список
         localStorage.setItem('roads', JSON.stringify(data));
       }
     } catch (error) {
       console.error('Error loading roads:', error);
       const savedRoads = localStorage.getItem('roads');
       if (savedRoads) {
-        setRoads(JSON.parse(savedRoads));
+        const roadsData = JSON.parse(savedRoads);
+        setRoads(roadsData);
+        setFilteredRoads(roadsData);
       }
     }
+  };
+
+  // Очистка поиска
+  const clearSearch = () => {
+    setSearchQuery('');
   };
 
   // Функция для центрирования карты на дороге
@@ -279,10 +303,7 @@ export default function App() {
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          {/* Контроллер для управления картой */}
           <MapController center={mapCenter} zoom={mapZoom} />
-
-          {/* Компонент рисования */}
           <RoadDrawer
             key={drawerKey}
             isDrawing={isDrawing}
@@ -329,91 +350,165 @@ export default function App() {
         </Button>
 
         <Typography variant="h6" gutterBottom>
-          Список дорог ({roads.length})
+          Список дорог ({filteredRoads.length})
+          {searchQuery && ` (найдено ${filteredRoads.length} из ${roads.length})`}
         </Typography>
-        <Box sx={{ flex: 1, overflowY: 'auto' }}>
-          <List>
-            {roads.map(road => (
-              <ListItem
-                key={road.id}
-                button
-                onClick={() => handleRoadListClick(road)}
-                sx={{
-                  borderBottom: '1px solid #eee',
-                  backgroundColor: selectedRoad?.id === road.id ? '#e3f2fd' : 'inherit',
-                  '&:hover': { backgroundColor: '#f5f5f5' }
-                }}
-              >
-                <ListItemText
-                  primary={road.name}
-                  secondary={`ID: ${road.id} • Точек: ${parseWKTToCoords(road.geom).length}`}
-                />
-              </ListItem>
-            ))}
-          </List>
-        </Box>
-      </Paper>
+         {/* Поле поиска */}
+<TextField
+  placeholder="Поиск по названию дороги..."
+  value={searchQuery}
+  onChange={(e) => setSearchQuery(e.target.value)}
+  fullWidth
+  sx={{ mb: 2 }}
+  InputProps={{
+    startAdornment: (
+      <InputAdornment position="start">
+        <span style={{ fontSize: '20px' }}>🔍</span>
+      </InputAdornment>
+    ),
+    endAdornment: searchQuery && (
+      <InputAdornment position="end">
+        <IconButton
+          aria-label="Очистить поиск"
+          onClick={clearSearch}
+          edge="end"
+          size="small"
+        >
+          <span style={{ fontSize: '16px' }}>✕</span>
+        </IconButton>
+      </InputAdornment>
+    )
+  }}
+/>
 
-      {/* Диалог с информацией о дороге */}
-      <Dialog open={infoDialogOpen} onClose={closeInfoDialog} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          <Box display="flex" alignItems="center" justifyContent="space-between">
-            <Typography variant="h6">
-              {selectedRoad?.name}
-            </Typography>
-            <IconButton onClick={closeInfoDialog}>
-              ✕
-            </IconButton>
-          </Box>
-        </DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="textSecondary" gutterBottom>
-            ID: {selectedRoad?.id}
+<Box sx={{ flex: 1, overflowY: 'auto' }}>
+  {filteredRoads.length === 0 ? (
+    <Box sx={{ textAlign: 'center', py: 4, color: 'text.secondary' }}>
+      {searchQuery ? (
+        <>
+          <Typography variant="body1" gutterBottom>
+            Дороги с названием "{searchQuery}" не найдены
           </Typography>
-
-          <Typography variant="h6" sx={{ mt: 2, mb: 1 }}>
-            Документы ({documents.length})
-          </Typography>
-
-          {documents.length > 0 ? (
-            <List>
-              {documents.map(doc => (
-                <ListItem
-                  key={doc.id}
-                  component="a"
-                  href={`http://localhost:8000${doc.filepath}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  sx={{
-                    textDecoration: 'none',
-                    color: 'inherit',
-                    '&:hover': { backgroundColor: '#f5f5f5' }
-                  }}
-                >
-                  <span style={{ marginRight: '8px', color: '#1976d2' }}>📄</span>
-                  <ListItemText
-                    primary={doc.filename}
-                    secondary={doc.creation_date ? new Date(doc.creation_date).toLocaleDateString() : 'Дата не указана'}
-                  />
-                </ListItem>
-              ))}
-            </List>
-          ) : (
-            <Typography variant="body2" color="textSecondary">
-              Нет прикрепленных документов
-            </Typography>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={closeInfoDialog}>Закрыть</Button>
           <Button
-            onClick={() => selectedRoad && focusOnRoad(selectedRoad)}
             variant="outlined"
+            onClick={clearSearch}
+            size="small"
           >
-            Показать на карте
+            Показать все дороги
           </Button>
-        </DialogActions>
-      </Dialog>
+        </>
+      ) : (
+        <Typography variant="body1">
+          Нет созданных дорог
+        </Typography>
+      )}
     </Box>
+  ) : (
+    <List>
+      {filteredRoads.map(road => (
+        <ListItem
+          key={road.id}
+          button
+          onClick={() => handleRoadListClick(road)}
+          sx={{
+            borderBottom: '1px solid #eee',
+            backgroundColor: selectedRoad?.id === road.id ? '#e3f2fd' : 'inherit',
+            '&:hover': { backgroundColor: '#f5f5f5' }
+          }}
+        >
+          <ListItemText
+            primary={highlightSearchMatch(road.name, searchQuery)}
+            secondary={`ID: ${road.id} • Точек: ${parseWKTToCoords(road.geom).length}`}
+          />
+        </ListItem>
+      ))}
+    </List>
+  )}
+</Box>
+</Paper>
+
+{/* Диалог с информацией о дороге */}
+<Dialog open={infoDialogOpen} onClose={closeInfoDialog} maxWidth="sm" fullWidth>
+  <DialogTitle>
+    <Box display="flex" alignItems="center" justifyContent="space-between">
+      <Typography variant="h6">
+        {selectedRoad?.name}
+      </Typography>
+      <IconButton onClick={closeInfoDialog}>
+        ✕
+      </IconButton>
+    </Box>
+  </DialogTitle>
+  <DialogContent>
+    <Typography variant="body2" color="textSecondary" gutterBottom>
+      ID: {selectedRoad?.id}
+    </Typography>
+
+    <Typography variant="h6" sx={{ mt: 2, mb: 1 }}>
+      Документы ({documents.length})
+    </Typography>
+
+    {documents.length > 0 ? (
+      <List>
+        {documents.map(doc => (
+          <ListItem
+            key={doc.id}
+            component="a"
+            href={`http://localhost:8000${doc.filepath}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            sx={{
+              textDecoration: 'none',
+              color: 'inherit',
+              '&:hover': { backgroundColor: '#f5f5f5' }
+            }}
+          >
+            <span style={{ marginRight: '8px', color: '#1976d2' }}>📄</span>
+            <ListItemText
+              primary={doc.filename}
+              secondary={doc.creation_date ? new Date(doc.creation_date).toLocaleDateString() : 'Дата не указана'}
+            />
+          </ListItem>
+        ))}
+      </List>
+    ) : (
+      <Typography variant="body2" color="textSecondary">
+        Нет прикрепленных документов
+      </Typography>
+    )}
+  </DialogContent>
+  <DialogActions>
+    <Button onClick={closeInfoDialog}>Закрыть</Button>
+    <Button
+      onClick={() => selectedRoad && focusOnRoad(selectedRoad)}
+      variant="outlined"
+    >
+      Показать на карте
+    </Button>
+  </DialogActions>
+</Dialog>
+</Box>
+);
+}
+
+// Функция для подсветки совпадений в поиске (добавьте эту функцию в конец файла)
+function highlightSearchMatch(text, query) {
+  if (!query.trim()) return text;
+
+  const regex = new RegExp(`(${query})`, 'gi');
+  const parts = text.split(regex);
+
+  return (
+    <span>
+      {parts.map((part, index) =>
+        part.toLowerCase() === query.toLowerCase() ? (
+          <span key={index} style={{ backgroundColor: '#ffeb3b', fontWeight: 'bold' }}>
+            {part}
+          </span>
+        ) : (
+          part
+        )
+      )}
+    </span>
   );
 }
