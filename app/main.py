@@ -29,6 +29,7 @@ app.add_middleware(
 
 # Включаем роутер дорог с префиксом /roads и тегом для документации
 app.include_router(routes.router, prefix="/roads", tags=["Roads"])
+app.include_router(routes.router, prefix="/api/v1", tags=["crosswalks"])
 
 @app.get("/")
 async def root():

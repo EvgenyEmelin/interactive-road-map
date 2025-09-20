@@ -1,8 +1,10 @@
+from geoalchemy2.functions import ST_GeomFromText
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete
-from app.models.models import Road, Document
-from app.schemas.schemas import RoadCreate, convert_db_geom_to_wkt
+from app.models.models import Road, Document, Crosswalk
+from app.schemas.schemas import RoadCreate, convert_db_geom_to_wkt, CrosswalkCreate, CrosswalkUpdate
 from geoalchemy2 import WKTElement
+
 
 
 async def get_roads_count(db: AsyncSession) -> int:
@@ -146,3 +148,107 @@ async def delete_document(db: AsyncSession, document_id: int) -> bool:
     await db.delete(document)
     await db.commit()
     return True
+
+
+async def get_crosswalk(db: AsyncSession, crosswalk_id: int):
+    # Используем ST_AsText для конвертации геометрии в WKT
+    from sqlalchemy import text
+    result = await db.execute(
+        text("""
+            SELECT id, name, description, width, has_traffic_light,
+                   near_educational_institution, has_t7, created_at, updated_at,
+                   ST_AsText(geom) as geom
+            FROM crosswalks 
+            WHERE id = :crosswalk_id
+        """),
+        {"crosswalk_id": crosswalk_id}
+    )
+    return result.mappings().first()
+
+async def get_crosswalks(db: AsyncSession, skip: int = 0, limit: int = 100):
+    # Используем ST_AsText для конвертации геометрии в WKT
+    from sqlalchemy import text
+    result = await db.execute(
+        text("""
+            SELECT id, name, description, width, has_traffic_light,
+                   near_educational_institution, has_t7, created_at, updated_at,
+                   ST_AsText(geom) as geom
+            FROM crosswalks 
+            ORDER BY id 
+            LIMIT :limit OFFSET :skip
+        """),
+        {"limit": limit, "skip": skip}
+    )
+    return result.mappings().all()
+
+
+async def create_crosswalk(db: AsyncSession, crosswalk_in: CrosswalkCreate):
+    geom_wkt = crosswalk_in.geom
+    if geom_wkt.startswith('POINT'):
+        # Можно не проверять дальше, точка всегда валидна
+        pass
+    elif geom_wkt.startswith('LINESTRING'):
+        # Проверяем наличие минимум 2 точек
+        if 'EMPTY' in geom_wkt or geom_wkt.count(',') < 1:
+            raise ValueError("LINESTRING must have at least 2 points")
+    else:
+        raise ValueError("Geometry must be a POINT or LINESTRING")
+
+    # Используем только WKTElement
+    geom = WKTElement(geom_wkt, srid=4326)
+
+    db_crosswalk = Crosswalk(
+        name=crosswalk_in.name,
+        description=crosswalk_in.description,
+        width=crosswalk_in.width,
+        has_traffic_light=crosswalk_in.has_traffic_light,
+        near_educational_institution=crosswalk_in.near_educational_institution,
+        has_t7=crosswalk_in.has_t7,
+        geom=geom,
+    )
+
+    db.add(db_crosswalk)
+    await db.commit()
+    await db.refresh(db_crosswalk)
+
+    # Возвращаем полный объект Crosswalk (не словарь)
+    return db_crosswalk
+
+async def update_crosswalk(db: AsyncSession, crosswalk_id: int, crosswalk_in: CrosswalkUpdate):
+    result = await db.execute(select(Crosswalk).where(Crosswalk.id == crosswalk_id))
+    db_crosswalk = result.scalar_one_or_none()
+    if not db_crosswalk:
+        return None
+
+    # Обновляем только те поля, что не равны None (partial update)
+    if crosswalk_in.name is not None:
+        db_crosswalk.name = crosswalk_in.name
+    if crosswalk_in.description is not None:
+        db_crosswalk.description = crosswalk_in.description
+    if crosswalk_in.width is not None:
+        db_crosswalk.width = crosswalk_in.width
+    if crosswalk_in.has_traffic_light is not None:
+        db_crosswalk.has_traffic_light = crosswalk_in.has_traffic_light
+    if crosswalk_in.near_educational_institution is not None:
+        db_crosswalk.near_educational_institution = crosswalk_in.near_educational_institution
+    if crosswalk_in.has_t7 is not None:
+        db_crosswalk.has_t7 = crosswalk_in.has_t7
+    if crosswalk_in.geom is not None:
+        if not crosswalk_in.geom.startswith('LINESTRING'):
+            raise ValueError("Geometry must be a LINESTRING")
+        if 'EMPTY' in crosswalk_in.geom or crosswalk_in.geom.count(',') < 1:
+            raise ValueError("LINESTRING must have at least 2 points")
+        db_crosswalk.geom = WKTElement(crosswalk_in.geom, srid=4326)
+
+    await db.commit()
+    await db.refresh(db_crosswalk)
+    return db_crosswalk
+
+async def delete_crosswalk(db: AsyncSession, crosswalk_id: int):
+    result = await db.execute(select(Crosswalk).where(Crosswalk.id == crosswalk_id))
+    db_crosswalk = result.scalar_one_or_none()
+    if db_crosswalk:
+        await db.delete(db_crosswalk)
+        await db.commit()
+        return True
+    return False

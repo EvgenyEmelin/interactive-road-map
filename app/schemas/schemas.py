@@ -1,6 +1,6 @@
 from typing import List, Optional, Any
 from datetime import date, datetime
-from pydantic import BaseModel, ConfigDict, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, field_serializer, field_validator, validator
 from shapely import wkb
 from geoalchemy2 import WKBElement, Geometry
 import geoalchemy2
@@ -135,3 +135,48 @@ class RoadsListResponse(BaseModel):
     limit: int
 
     model_config = ConfigDict(from_attributes=True)
+
+#Схемы для пешеходных переходов
+class CrosswalkBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    width: float
+    has_traffic_light: bool = False
+    near_educational_institution: bool = False
+    has_t7: bool = False
+    geom: str  # WKT строка
+
+class CrosswalkUpdate(CrosswalkBase):
+    # Все поля опциональны для обновления
+    name: Optional[str] = None
+    description: Optional[str] = None
+    width: Optional[float] = None
+    has_traffic_light: Optional[bool] = None
+    near_educational_institution: Optional[bool] = None
+    has_t7: Optional[bool] = None
+    geom: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class CrosswalkCreate(CrosswalkBase):
+    pass
+
+
+class Crosswalk(CrosswalkBase):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+    # Добавьте кастомный валидатор для преобразования WKBElement в WKT
+    @validator('geom', pre=True)
+    def convert_geometry(cls, v):
+        # Если геометрия уже в WKT формате, возвращаем как есть
+        if isinstance(v, str) and (v.startswith('POINT') or v.startswith('LINESTRING')):
+            return v
+        # Иначе пытаемся конвертировать
+        return convert_db_geom_to_wkt(v)
